@@ -1,0 +1,40 @@
+---
+title: "Mapped Data Clean"
+author: "Zain"
+date: "2025-03-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+
+library(here)
+library(tidyverse)
+
+```
+
+```{r}
+
+ data <- read_csv(here("data", "mapped_data_w21.csv"))
+
+```
+
+```{r}
+
+## demogrpahic variables - gender age, and education need to be converted to categriccal ## 
+
+data$gender <- as.factor(data$gender)
+
+## binary for gender - male = 0 , female = 1
+
+data$gender <- ifelse(data$gender == 1,0, "Female")
+
+## age to factor 
+
+data$age <- as.factor(data$age)
+
+
+
