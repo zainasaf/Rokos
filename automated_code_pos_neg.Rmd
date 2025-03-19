@@ -1,0 +1,172 @@
+---
+title: "Untitled"
+author: "Zain"
+date: "2025-03-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+
+library(tidyverse)
+library(here)
+
+```
+
+
+
+```{r}
+
+
+# Define function to process each dataset
+process_survey_data <- function(month, year) {
+  
+  # Construct file path
+  file_path <- here("data", paste0(tolower(month), "_", year, ".csv"))
+  
+  # Check if file exists
+  if (!file.exists(file_path)) {
+    warning(paste("File not found:", file_path))
+    return(NULL)
+  }
+  
+  # Read the dataset
+  df <- read_csv(file_path)
+  
+  # Select relevant variables (make sure these column names exactly match what's in your CSV files)
+  df <- df %>% 
+    select(weight,
+           "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)",
+           "Q1 How has the financial situation of your household changed over the last 12 months?",
+           "Q3 How do you think the general economic situation in this country has changed over the last 12 months?",
+           "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
+           "Q2 How do you expect the financial position of your household to change over the next 12 months?",
+           "Q42 Compared to the last 12 months, do you expect to spend more or less money on major purchases such as furniture and electrical goods?")
+  
+  # Dynamic renaming using paste()
+  df <- df %>% rename(
+    !!paste0("household_last_12_", tolower(month), "_", year) := "Q1 How has the financial situation of your household changed over the last 12 months?",
+    !!paste0("general_economic_last_12_", tolower(month), "_", year) := "Q3 How do you think the general economic situation in this country has changed over the last 12 months?",
+    !!paste0("general_economic_next_12_", tolower(month), "_", year) := "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
+    !!paste0("household_next_12_", tolower(month), "_", year) := "Q2 How do you expect the financial position of your household to change over the next 12 months?",
+    !!paste0("major_purchases_", tolower(month), "_", year) := "Q42 Compared to the last 12 months, do you expect to spend more or less money on major purchases such as furniture and electrical goods?",
+    !!paste0("save_money_", tolower(month), "_", year) := "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)"
+  )
+  
+  # Convert save_money to numeric (removing % sign)
+  save_money_col <- paste0("save_money_", tolower(month), "_", year)
+  df <- df %>%
+    mutate(
+      !!save_money_col := as.numeric(gsub("%", "", .[[save_money_col]])),
+      weight = as.numeric(weight)
+    )
+  
+  # Define weighted net score function
+  weighted_net_score <- function(data, var, weight_col) {
+    result <- data %>%
+      filter(!is.na(.data[[var]])) %>%
+      mutate(
+        positive_weighted = if_else(.data[[var]] %in% c("A lot better", "A little better", "Spend more money"), .data[[weight_col]], 0),
+        negative_weighted = if_else(.data[[var]] %in% c("A lot worse", "A little worse", "Spend less money"), .data[[weight_col]], 0)
+      ) %>%
+      summarise(
+        net_score = ifelse(sum(positive_weighted) + sum(negative_weighted) == 0, NA_real_,
+                          round((sum(positive_weighted) - sum(negative_weighted)) / 
+                                (sum(positive_weighted) + sum(negative_weighted)) * 100))
+      ) %>%
+      pull(net_score)
+    
+    if (length(result) == 0) result <- NA_real_
+    return(result)
+  }
+  
+  # Create variable names
+  household_last_12_col <- paste0("household_last_12_", tolower(month), "_", year)
+  household_next_12_col <- paste0("household_next_12_", tolower(month), "_", year)
+  general_economic_last_12_col <- paste0("general_economic_last_12_", tolower(month), "_", year)
+  general_economic_next_12_col <- paste0("general_economic_next_12_", tolower(month), "_", year)
+  major_purchases_col <- paste0("major_purchases_", tolower(month), "_", year)
+  
+  # Calculate metrics
+  household_last_12_net <- weighted_net_score(df, household_last_12_col, "weight")
+  household_next_12_net <- weighted_net_score(df, household_next_12_col, "weight")
+  general_economic_last_12_net <- weighted_net_score(df, general_economic_last_12_col, "weight")
+  general_economic_next_12_net <- weighted_net_score(df, general_economic_next_12_col, "weight")
+  major_purchases_net <- weighted_net_score(df, major_purchases_col, "weight")
+  
+  # Calculate save_money_net
+  save_money_net <- df %>%
+    filter(!is.na(.data[[save_money_col]])) %>%
+    mutate(
+      positive_weighted = if_else(.data[[save_money_col]] >= 60, weight, 0),
+      negative_weighted = if_else(.data[[save_money_col]] <= 40, weight, 0)
+    ) %>%
+    summarise(
+      net_score = ifelse(sum(positive_weighted) + sum(negative_weighted) == 0, NA_real_,
+                       round((sum(positive_weighted) - sum(negative_weighted)) /
+                             (sum(positive_weighted) + sum(negative_weighted)) * 100))
+    ) %>%
+    pull(net_score)
+  
+  # Ensure it returns a numeric value and not NULL
+  if (length(save_money_net) == 0) save_money_net <- NA_real_
+  
+  # Calculate overall index
+  all_indices <- c(household_last_12_net, household_next_12_net, 
+                   general_economic_last_12_net, general_economic_next_12_net, 
+                   major_purchases_net)
+  overall_index <- round(mean(all_indices, na.rm = TRUE))
+  
+  # Create a single row with month label and all indices
+  result_row <- tibble(
+    month_year = paste(month, year),
+    household_last_12_net = household_last_12_net,
+    household_next_12_net = household_next_12_net,
+    general_economic_last_12_net = general_economic_last_12_net,
+    general_economic_next_12_net = general_economic_next_12_net,
+    major_purchases_net = major_purchases_net,
+    save_money_net = save_money_net,
+    overall_index = overall_index
+  )
+  
+  return(result_row)
+}
+
+# Define list of months and years
+months <- c("June", "July", "August", "September", "October", "November", "December", "January", "February")
+years <- c(rep("2024", 7), rep("2025", 2))  # Assigning correct years for each month
+
+# Create a data frame to store the results with months as rows and metrics as columns
+results_df <- tibble()
+
+# Process each month and add to the results dataframe
+for (i in seq_along(months)) {
+  month <- months[i]
+  year <- years[i]
+  message("Processing ", month, " ", year)
+  
+  result_row <- process_survey_data(month, year)
+  if (!is.null(result_row)) {
+    results_df <- bind_rows(results_df, result_row)
+  }
+}
+
+# Add a sortable date column
+results_df <- results_df %>%
+  mutate(
+    month_name = str_extract(month_year, "^\\w+"),
+    month_num = match(tolower(month_name), tolower(month.name)),
+    year = as.numeric(str_extract(month_year, "\\d{4}$")),
+    sort_date = as.Date(paste(year, month_num, "01", sep = "-"))
+  ) %>%
+  arrange(sort_date) %>%
+  select(-month_name, -month_num, -year, -sort_date)
+
+# View the results
+print(results_df)
+
+# Save results
+# write.csv(results_df, here("results", "monthly_indices_table.csv"), row.names = FALSE)
