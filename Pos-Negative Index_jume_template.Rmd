@@ -1,0 +1,276 @@
+---
+title: "Index Creation"
+author: "Zain"
+date: "2025-03-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+
+library(here)
+library(tidyverse)
+
+```
+
+```{r}
+
+ #march_2025 <- read_csv(here("data", "wave20.csv"))
+
+ june_2024 <- read_csv(here("data", "june_data.csv"))
+
+ june_2024_index <- june_2024 %>% 
+   select(weight, "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)", "Q1 How has the financial situation of your household changed over the last 12 months?", "Q3 How do you think the general economic situation in this country has changed over the last 12 months?", "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?", "Q2 How do you expect the financial position of your household to change over the next 12 months?", "Q42 Compared to the last 12 months, do you expect to spend more or less money on major purchases such as furniture and electrical goods?")
+ 
+
+ june_2024_index <- june_2024_index %>% 
+ rename(household_last_12_june = "Q1 How has the financial situation of your household changed over the last 12 months?",
+        general_economic_last_12_june = "Q3 How do you think the general economic situation in this country has changed over the last 12 months?",
+        general_economic_next_12_june = "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
+        household_next_12_june = "Q2 How do you expect the financial position of your household to change over the next 12 months?",
+        major_purchases_june = "Q42 Compared to the last 12 months, do you expect to spend more or less money on major purchases such as furniture and electrical goods?",
+        save_money_june = "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)") -> june_2024_index
+
+write.csv(june_2024_index, here("data", "positive_negative", "june_2024_index.csv"))
+
+```
+ 
+```{r}
+
+df <- read.csv(here("data", "positive_negative", "june_2024_index.csv"))
+
+
+# Convert save_money_june to numeric (removing % sign)
+df <- df %>%
+  mutate(
+    save_money_june = as.numeric(gsub("%", "", save_money_june)),
+    weight = as.numeric(weight)  # Ensure weight is numeric
+  )
+
+# Function to calculate weighted net score (proportion-based)
+# Multiplied by 100 and rounded to nearest whole number
+weighted_net_score <- function(data, var, weight_col) {
+  data %>%
+    filter(!is.na(.data[[var]])) %>%
+    mutate(
+      positive_weighted = if_else(.data[[var]] %in% c("A lot better", "A little better", "Spend more money"), .data[[weight_col]], 0),
+      negative_weighted = if_else(.data[[var]] %in% c("A lot worse", "A little worse", "Spend less money"), .data[[weight_col]], 0),
+
+    ) %>%
+    summarise(
+      # Here's where we multiply by 100 and round to the nearest integer
+      net_score = round((sum(positive_weighted) - sum(negative_weighted)) / 
+                  (sum(positive_weighted) + sum(negative_weighted)) * 100)  # Multiply by 100 and round
+    ) %>%
+    pull(net_score)
+}
+
+# Compute net scores for categorical variables
+household_last_12_net <- weighted_net_score(df, "household_last_12_june", "weight")
+household_next_12_net <- weighted_net_score(df, "household_next_12_june", "weight")
+general_economic_last_12_net <- weighted_net_score(df, "general_economic_last_12_june", "weight")
+general_economic_next_12_net <- weighted_net_score(df, "general_economic_next_12_june", "weight")
+major_purchase_net <- weighted_net_score(df, "major_purchases_june", "weight")
+
+# Compute net score for save_money_june
+save_money_net <- df %>%
+  filter(!is.na(save_money_june)) %>%
+  mutate(
+    positive_weighted = if_else(save_money_june >= 60, weight, 0),
+    negative_weighted = if_else(save_money_june <= 40, weight, 0)
+  ) %>%
+  summarise(
+    
+    net_score = round((sum(positive_weighted) - sum(negative_weighted)) /
+                (sum(positive_weighted) + sum(negative_weighted)) * 100)  
+  ) %>%
+  pull(net_score)
+
+overall_index <- round((household_last_12_net + household_next_12_net + general_economic_last_12_net + general_economic_next_12_net + major_purchase_net) / 5)
+
+
+# Print results
+list(
+  household_last_12_net = household_last_12_net,
+  household_next_12_net = household_next_12_net,
+  general_economic_last_12_net = general_economic_last_12_net,
+  general_economic_next_12_net = general_economic_next_12_net,
+  save_money_net = save_money_net,
+  overall_index = overall_index
+)
+
+
+```
+
+
+```{r}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+```{r}
+
+june_data <- read_csv(here("data", "positive_negative", "june_2024_index.csv"))
+
+
+# First, let's analyze the save_money_june variable to understand the distribution
+save_money_distribution <- june_data %>%
+  # Make sure to handle potential non-numeric values
+  mutate(
+    save_money_numeric = as.numeric(as.character(save_money_june))
+  ) %>%
+  # Create categories for analysis
+  mutate(
+    save_money_category = case_when(
+      save_money_numeric >= 60 ~ "60 or more",
+      save_money_numeric <= 40 ~ "40 or less",
+      TRUE ~ "Between 41-59"
+    )
+  ) %>%
+  # Count weighted distribution
+  count(save_money_category, wt = weight) %>%
+  mutate(pct = n / sum(n) * 100)
+
+# Display the distribution
+print("Save Money June - Weighted Distribution:")
+print(save_money_distribution)
+
+# Calculate all five indices
+indices <- june_data %>%
+  summarise(
+    # 1. household_last_12_june index
+    household_last_12_index = weighted.mean(
+      case_when(
+        household_last_12_june %in% c("A lot better", "A little better") ~ 1,
+        household_last_12_june %in% c("A lot worse", "A little worse") ~ -1,
+        household_last_12_june == "Stayed the same" ~ 0,
+        TRUE ~ NA_real_
+      ), 
+      w = weight,
+      na.rm = TRUE
+    ) * 100,
+    
+    # 2. household_next_12_june index
+    household_next_12_index = weighted.mean(
+      case_when(
+        household_next_12_june %in% c("A lot better", "A little better") ~ 1,
+        household_next_12_june %in% c("A lot worse", "A little worse") ~ -1,
+        household_next_12_june == "Stayed the same" ~ 0,
+        TRUE ~ NA_real_
+      ), 
+      w = weight,
+      na.rm = TRUE
+    ) * 100,
+    
+    # 3. general_economic_last_12_june index
+    general_economic_last_12_index = weighted.mean(
+      case_when(
+        general_economic_last_12_june %in% c("A lot better", "A little better") ~ 1,
+        general_economic_last_12_june %in% c("A lot worse", "A little worse") ~ -1,
+        general_economic_last_12_june == "Stayed the same" ~ 0,
+        TRUE ~ NA_real_
+      ), 
+      w = weight,
+      na.rm = TRUE
+    ) * 100,
+    
+    # 4. general_economic_next_12_june index
+    general_economic_next_12_index = weighted.mean(
+      case_when(
+        general_economic_next_12_june %in% c("A lot better", "A little better") ~ 1,
+        general_economic_next_12_june %in% c("A lot worse", "A little worse") ~ -1,
+        general_economic_next_12_june == "Stayed the same" ~ 0,
+        TRUE ~ NA_real_
+      ), 
+      w = weight,
+      na.rm = TRUE
+    ) * 100,
+    
+    # 5. save_money_june index (for values 60%+ minus values 40%-)
+    # Make sure we're properly handling save_money_june as numeric
+    save_money_index = weighted.mean(
+      case_when(
+        as.numeric(as.character(save_money_june)) >= 60 ~ 1,
+        as.numeric(as.character(save_money_june)) <= 40 ~ -1,
+        TRUE ~ 0
+      ), 
+      w = weight,
+      na.rm = TRUE
+    ) * 100
+  )
+
+# Display the results
+print("Net Positive/Negative Indices:")
+print(indices)
+
+# Create a longer format table for better presentation
+indices_long <- indices %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "Index",
+    values_to = "Score"
+  ) %>%
+  arrange(desc(Score))
+
+print("Indices Ranked:")
+print(indices_long)
+
+# Visualize these indices with a bar chart
+ggplot(indices_long, aes(x = reorder(Index, Score), y = Score)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "darkgrey") +
+  coord_flip() +
+  labs(
+    title = "Net Positive/Negative Indices (June 2024)",
+    x = NULL,
+    y = "Net Score (weighted %)"
+  ) +
+  theme_minimal()
+
+# Optional: Calculate detailed counts for all indices to verify correctness
+indices_verification <- june_data %>%
+  summarise(
+    # Save money verification
+    save_money_positive = weighted.mean(as.numeric(as.character(save_money_june)) >= 60, 
+                                       w = weight, na.rm = TRUE) * 100,
+    save_money_negative = weighted.mean(as.numeric(as.character(save_money_june)) <= 40, 
+                                       w = weight, na.rm = TRUE) * 100,
+    save_money_net = save_money_positive - save_money_negative,
+    
+    # Other indices verification (example)
+    household_last_12_positive = weighted.mean(
+      household_last_12_june %in% c("A lot better", "A little better"), 
+      w = weight, na.rm = TRUE) * 100,
+    household_last_12_negative = weighted.mean(
+      household_last_12_june %in% c("A lot worse", "A little worse"), 
+      w = weight, na.rm = TRUE) * 100,
+    household_last_12_net = household_last_12_positive - household_last_12_negative
+  )
+
+print("Verification of calculations:")
+print(indices_verification)
