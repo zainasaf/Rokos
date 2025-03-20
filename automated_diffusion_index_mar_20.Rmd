@@ -1,0 +1,170 @@
+---
+title: "automated_diffusion_index"
+author: "Zain"
+date: "2025-03-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+
+```
+
+```{r}
+
+# Define function to process each dataset
+process_survey_data <- function(month, year) {
+  
+
+  file_path <- here("data", paste0(tolower(month), "_", year, ".csv"))
+  
+
+  if (!file.exists(file_path)) {
+    warning(paste("File not found:", file_path))
+    return(NULL)
+  }
+  
+
+  df <- read_csv(file_path)
+
+  df <- df %>% 
+    select(weight,
+           "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)",
+           "Q1 How has the financial situation of your household changed over the last 12 months?",
+           "Q3 How do you think the general economic situation in this country has changed over the last 12 months?",
+           "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
+           "Q2 How do you expect the financial position of your household to change over the next 12 months?",
+           "Q41 In view of the general economic situation, do you think now is the right time for people to make major purchases such as furniture or electrical goods?")
+  
+  # Dynamic renaming using paste()
+  df <- df %>% rename(
+    !!paste0("household_last_12_", tolower(month), "_", year) := "Q1 How has the financial situation of your household changed over the last 12 months?",
+    !!paste0("general_economic_last_12_", tolower(month), "_", year) := "Q3 How do you think the general economic situation in this country has changed over the last 12 months?",
+    !!paste0("general_economic_next_12_", tolower(month), "_", year) := "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
+    !!paste0("household_next_12_", tolower(month), "_", year) := "Q2 How do you expect the financial position of your household to change over the next 12 months?",
+    !!paste0("major_purchases_", tolower(month), "_", year) := "Q41 In view of the general economic situation, do you think now is the right time for people to make major purchases such as furniture or electrical goods?",
+    !!paste0("save_money_", tolower(month), "_", year) := "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)"
+  )
+  
+  # Convert save_money to numeric (removing % sign)
+  save_money_col <- paste0("save_money_", tolower(month), "_", year)
+  df <- df %>%
+    mutate(
+      !!save_money_col := as.numeric(gsub("%", "", .[[save_money_col]])),
+      weight = as.numeric(weight)
+    )
+  
+weighted_diffusion_index <- function(data, var, weight_col) {
+  result <- data %>%
+    filter(!is.na(.data[[var]])) %>%
+    mutate(
+      positive_weighted = if_else(.data[[var]] %in% c("A lot better", "A little better", "Right time"), .data[[weight_col]], 0),
+      neutral_weighted = if_else(.data[[var]] %in% c("Stayed the same", "Neither", "Neither right nor wrong time"), .data[[weight_col]] * 0.5, 0)
+    ) %>%
+    summarise(
+      total_weight = sum(.data[[weight_col]]),
+      diffusion_index = round((sum(positive_weighted) + sum(neutral_weighted)) / total_weight * 100)
+    )
+  
+  return(result$diffusion_index)
+}
+
+
+  household_last_12_col <- paste0("household_last_12_", tolower(month), "_", year)
+  household_next_12_col <- paste0("household_next_12_", tolower(month), "_", year)
+  general_economic_last_12_col <- paste0("general_economic_last_12_", tolower(month), "_", year)
+  general_economic_next_12_col <- paste0("general_economic_next_12_", tolower(month), "_", year)
+  major_purchases_col <- paste0("major_purchases_", tolower(month), "_", year)
+  
+
+  household_last_12_diffusion <- weighted_diffusion_index(df, household_last_12_col, "weight")
+  household_next_12_diffusion <- weighted_diffusion_index(df, household_next_12_col, "weight")
+  general_economic_last_12_diffusion <- weighted_diffusion_index(df, general_economic_last_12_col, "weight")
+  general_economic_next_12_diffusion <- weighted_diffusion_index(df, general_economic_next_12_col, "weight")
+  major_purchases_diffusion <- weighted_diffusion_index(df, major_purchases_col, "weight")
+  
+
+save_money_diffusion <- df %>%
+  filter(!is.na(.data[[save_money_col]])) %>%
+  mutate(
+    positive_weighted = if_else(.data[[save_money_col]] >= 60, weight, 0),
+    neutral_weighted = if_else(.data[[save_money_col]] == 50, weight * 0.5, 0)
+  ) %>%
+  summarise(
+    total_weight = sum(weight),
+    diffusion_index = round((sum(positive_weighted) + sum(neutral_weighted)) / total_weight * 100)
+  ) %>%
+  pull(diffusion_index)
+
+if (length(save_money_diffusion) == 0) save_money_diffusion <- NA_real_
+
+
+
+# Calculate overall index
+all_indices <- c(household_last_12_diffusion, household_next_12_diffusion, 
+                 general_economic_last_12_diffusion, general_economic_next_12_diffusion, 
+                 major_purchases_diffusion)
+overall_index <- round(mean(all_indices, na.rm = TRUE))
+
+
+
+# Create a single row with month label and all indices
+result_row <- tibble(
+  month_year = paste(month, year),
+  household_last_12_diffusion = household_last_12_diffusion,
+  household_next_12_diffusion = household_next_12_diffusion,
+  general_economic_last_12_diffusion = general_economic_last_12_diffusion,
+  general_economic_next_12_diffusion = general_economic_next_12_diffusion,
+  major_purchases_diffusion = major_purchases_diffusion,
+  save_money_diffusion = save_money_diffusion,
+  overall_index = overall_index
+)
+  
+  
+  return(result_row)
+}
+
+months <- c("June", "July", "August", "September", "October", "November", "December", "January", "February")
+years <- c(rep("2024", 7), rep("2025", 2))  # Assigning correct years for each month
+
+
+results_df <- tibble()
+
+
+for (i in seq_along(months)) {
+  month <- months[i]
+  year <- years[i]
+  message("Processing ", month, " ", year)
+  
+  result_row <- process_survey_data(month, year)
+  if (!is.null(result_row)) {
+    results_df <- bind_rows(results_df, result_row)
+  }
+}
+
+results_df <- results_df %>%
+  mutate(
+    month_name = str_extract(month_year, "^\\w+"),
+    month_num = match(tolower(month_name), tolower(month.name)),
+    year = as.numeric(str_extract(month_year, "\\d{4}$")),
+    sort_date = as.Date(paste(year, month_num, "01", sep = "-"))
+  ) %>%
+  arrange(sort_date) %>%
+  select(-month_name, -month_num, -year, -sort_date)
+
+
+print(results_df)
+
+
+
+ write.csv(results_df, here("output", "diffusion_index.csv"), row.names = FALSE)
+
+
+
+
+
