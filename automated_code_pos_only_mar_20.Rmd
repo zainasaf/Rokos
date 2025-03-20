@@ -10,6 +10,12 @@ knitr::opts_chunk$set(echo = FALSE)
 ```
 
 ```{r}
+library(tidyverse)
+library(here)
+
+```
+
+```{r}
 # Define function to process each dataset
 process_survey_data <- function(month, year) {
   
@@ -27,12 +33,14 @@ process_survey_data <- function(month, year) {
 
   df <- df %>% 
     select(weight,
-           "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)",
+            starts_with("Q43"),
            "Q1 How has the financial situation of your household changed over the last 12 months?",
            "Q3 How do you think the general economic situation in this country has changed over the last 12 months?",
            "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
            "Q2 How do you expect the financial position of your household to change over the next 12 months?",
            "Q41 In view of the general economic situation, do you think now is the right time for people to make major purchases such as furniture or electrical goods?")
+  
+    q43_col_name <- names(df)[grep("^Q43", names(df))]
   
   # Dynamic renaming using paste()
   df <- df %>% rename(
@@ -41,22 +49,17 @@ process_survey_data <- function(month, year) {
     !!paste0("general_economic_next_12_", tolower(month), "_", year) := "Q4 How do you expect the general economic situation in this country to develop over the next 12 months?",
     !!paste0("household_next_12_", tolower(month), "_", year) := "Q2 How do you expect the financial position of your household to change over the next 12 months?",
     !!paste0("major_purchases_", tolower(month), "_", year) := "Q41 In view of the general economic situation, do you think now is the right time for people to make major purchases such as furniture or electrical goods?",
-    !!paste0("save_money_", tolower(month), "_", year) := "Q44 Over the next 12 months, how likely will you be able to save any money? (probability out of 100)"
-  )
+     !!paste0("save_money_", tolower(month), "_", year) := q43_col_name
+)
+
   
-  # Convert save_money to numeric (removing % sign)
-  save_money_col <- paste0("save_money_", tolower(month), "_", year)
-  df <- df %>%
-    mutate(
-      !!save_money_col := as.numeric(gsub("%", "", .[[save_money_col]])),
-      weight = as.numeric(weight)
-    )
+ 
   
 weighted_positive_score <- function(data, var, weight_col) {
   result <- data %>%
     filter(!is.na(.data[[var]])) %>%
     mutate(
-      positive_weighted = if_else(.data[[var]] %in% c("A lot better", "A little better", "Right time"), .data[[weight_col]], 0)
+      positive_weighted = if_else(.data[[var]] %in% c("A lot better", "A little better", "Right time", "a very good time to save.", "a fairly good time to save."), .data[[weight_col]], 0)
     ) %>%
     summarise(
       total_weight = sum(.data[[weight_col]]),
@@ -73,6 +76,7 @@ weighted_positive_score <- function(data, var, weight_col) {
   general_economic_last_12_col <- paste0("general_economic_last_12_", tolower(month), "_", year)
   general_economic_next_12_col <- paste0("general_economic_next_12_", tolower(month), "_", year)
   major_purchases_col <- paste0("major_purchases_", tolower(month), "_", year)
+ save_money_col <- paste0("save_money_", tolower(month), "_", year) 
   
 
   household_last_12_positive <- weighted_positive_score(df, household_last_12_col, "weight")
@@ -80,20 +84,9 @@ weighted_positive_score <- function(data, var, weight_col) {
   general_economic_last_12_positive <- weighted_positive_score(df, general_economic_last_12_col, "weight")
   general_economic_next_12_positive <- weighted_positive_score(df, general_economic_next_12_col, "weight")
   major_purchases_positive <- weighted_positive_score(df, major_purchases_col, "weight")
+   save_money_positive <- weighted_positive_score(df, save_money_col, "weight")  
   
 
-save_money_positive <- df %>%
-  filter(!is.na(.data[[save_money_col]])) %>%
-  mutate(
-    positive_weighted = if_else(.data[[save_money_col]] >= 60, weight, 0)
-  ) %>%
-  summarise(
-    total_weight = sum(weight),
-    pct_positive = round(sum(positive_weighted) / total_weight * 100)
-  ) %>%
-  pull(pct_positive)
-
-if (length(save_money_positive) == 0) save_money_positive <- NA_real_
 
   # Calculate overall index
   all_indices <- c(household_last_12_positive, household_next_12_positive, 
